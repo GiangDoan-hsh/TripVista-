@@ -1,0 +1,740 @@
+
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TripVista Travel — Blog du lịch</title>
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Polyfill line-clamp used in cards */
+    .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  </style>
+</head>
+<body class="bg-neutral-50">
+  <div id="root"></div>
+
+  <!-- React 18 + ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <!-- Babel for JSX in-browser (quick start). For production, use a bundler. -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useState, useRef, useEffect, useMemo } = React;
+
+    // =============================================
+    // TripVista Travel — Blog du lịch chia sẻ kinh nghiệm
+    // =============================================
+    // Storage Keys
+    const POSTS_KEY = "tripvista_posts_v1";
+    const BRAND_KEY = "tripvista_brand_v1";
+
+    // Utils
+    const uid = () => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `id-\${Math.random().toString(36).slice(2)}`);
+    const cls = (...xs) => xs.filter(Boolean).join(" ");
+
+    // Tách chuỗi tiện dụng
+    const splitPhotos = (s) => String(s || "").split(/\\n|,/).map((t) => t.trim()).filter(Boolean);
+    const splitTags = (s) => String(s || "").split(/,|#|\\n/).map((t) => t.trim()).filter(Boolean);
+    const splitActivities = (s) => String(s || "").split(/\\n|;|-/).map((t) => t.trim()).filter(Boolean);
+
+    // Defaults
+    const defaultBrand = {
+      name: "TripVista Travel",
+      tagline: "Hành trình diệu kỳ • Giấc mơ trọn vẹn",
+      logo: "", // sẽ tải lên từ máy người dùng
+    };
+
+    const samplePosts = [
+      {
+        id: uid(),
+        title: "Kinh nghiệm săn mây Đà Lạt cuối tuần",
+        date: new Date().toISOString().slice(0, 10),
+        location: "Đà Lạt, Lâm Đồng",
+        tags: ["Việt Nam", "Đà Lạt", "Kinh nghiệm"],
+        cover:
+          "https://images.unsplash.com/photo-1544198365-3c79a6a1ed0c?q=80&w=1600&auto=format&fit=crop",
+        photos: [
+          "https://images.unsplash.com/photo-1543747036-98f38f1bdfc7?q=80&w=1600&auto=format&fit=crop",
+          "https://images.unsplash.com/photo-1544735716-392fe2489ffa?q=80&w=1600&auto=format&fit=crop",
+        ],
+        activities: [
+          "Dậy 4:30 di chuyển Cầu Đất",
+          "Săn mây 5:00–6:00",
+          "Cà phê vườn, check-in vườn hoa",
+        ],
+        content:
+          "Mang áo ấm, giày chống trượt và chuẩn bị thêm pin dự phòng cho máy ảnh. Đặt homestay gần chợ để thuận tiện di chuyển.",
+      },
+    ];
+
+    // Persistence
+    function loadPosts() {
+      try {
+        const raw = localStorage.getItem(POSTS_KEY);
+        if (!raw) return samplePosts;
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : samplePosts;
+      } catch (e) {
+        return samplePosts;
+      }
+    }
+    function savePosts(posts) { localStorage.setItem(POSTS_KEY, JSON.stringify(posts)); }
+
+    function loadBrand() {
+      try {
+        const raw = localStorage.getItem(BRAND_KEY);
+        return raw ? { ...defaultBrand, ...JSON.parse(raw) } : defaultBrand;
+      } catch (e) { return defaultBrand; }
+    }
+    function saveBrand(brand) { localStorage.setItem(BRAND_KEY, JSON.stringify(brand)); }
+
+    // UI Primitives
+    const Button = ({ children, className, ...props }) => (
+      <button
+        className={cls(
+          "rounded-2xl px-4 py-2 shadow-sm border border-neutral-200 hover:shadow transition active:scale-[0.99]",
+          className
+        )}
+        {...props}
+      >
+        {children}
+      </button>
+    );
+
+    const Input = (props) => (
+      <input
+        {...props}
+        className={cls(
+          "w-full rounded-2xl border border-neutral-300 px-3 py-2 outline-none focus:ring-2 focus:ring-neutral-800",
+          props.className
+        )}
+      />
+    );
+
+    const Textarea = (props) => (
+      <textarea
+        {...props}
+        className={cls(
+          "w-full rounded-2xl border border-neutral-300 px-3 py-2 outline-none focus:ring-2 focus:ring-neutral-800 min-h-32",
+          props.className
+        )}
+      />
+    );
+
+    const Card = ({ children, className }) => (
+      <div className={cls("rounded-3xl border border-neutral-100 shadow-sm bg-white", className)}>
+        {children}
+      </div>
+    );
+
+    const Tag = ({ text, onClick }) => (
+      <button
+        onClick={onClick}
+        className="text-sm rounded-full bg-neutral-100 hover:bg-neutral-200 px-3 py-1 mr-2 mb-2"
+      >
+        #{text}
+      </button>
+    );
+
+    const Modal = ({ open, onClose, children, className }) =>
+      !open ? null : (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+          <div className={cls("relative bg-white rounded-3xl shadow-xl max-w-2xl w-[92%] p-6", className)}>
+            {children}
+          </div>
+        </div>
+      );
+
+    // App Shell
+    const routes = { HOME: "home", WRITE: "write", POST: "post" };
+
+    function TripVistaApp() {
+      const [route, setRoute] = useState({ name: routes.HOME });
+      const [posts, setPosts] = useState(loadPosts);
+      const [brand, setBrand] = useState(loadBrand);
+      const [query, setQuery] = useState("");
+      const [activeTag, setActiveTag] = useState("");
+      const [brandOpen, setBrandOpen] = useState(false);
+      const fileRef = useRef(null);
+
+      useEffect(() => savePosts(posts), [posts]);
+      useEffect(() => saveBrand(brand), [brand]);
+
+      const allTags = useMemo(() => {
+        const map = new Map();
+        posts.forEach((p) => p.tags?.forEach((t) => map.set(t, (map.get(t) || 0) + 1)));
+        return Array.from(map.entries()).sort((a,b)=>b[1]-a[1]).map(([t])=>t);
+      }, [posts]);
+
+      const filteredPosts = useMemo(() => {
+        return posts
+          .filter((p) =>
+            [p.title, p.content, p.location, (p.tags || []).join(" ")]
+              .join(" ")
+              .toLowerCase()
+              .includes(query.toLowerCase())
+          )
+          .filter((p) => (activeTag ? p.tags?.includes(activeTag) : true))
+          .sort((a, b) => new Date(b.date) - new Date(a.date));
+      }, [posts, query, activeTag]);
+
+      function openPost(post) {
+        setRoute({ name: routes.POST, id: post.id });
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+      function goHome() {
+        setRoute({ name: routes.HOME });
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+
+      // Export / Import JSON
+      function exportJSON() {
+        const data = { version: 1, exportedAt: new Date().toISOString(), brand, posts };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const ts = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `tripvista-export-\${ts}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+      function handleImportClick() { fileRef.current?.click(); }
+      function handleImportFile(e) {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const parsed = JSON.parse(String(reader.result));
+            const incomingPosts = Array.isArray(parsed) ? parsed : parsed.posts;
+            const incomingBrand = parsed.brand;
+            if (!Array.isArray(incomingPosts)) throw new Error("File không đúng định dạng");
+            const normalized = incomingPosts.map((p) => ({ ...p, id: p.id || uid() }));
+            const mode = (window.prompt("Chọn chế độ: 'merge' để gộp (mặc định) hoặc 'replace' để ghi đè toàn bộ", "merge") || "merge").toLowerCase();
+            if (mode === "replace") {
+              setPosts(normalized);
+            } else {
+              setPosts((prev) => {
+                const map = new Map();
+                prev.forEach((p) => map.set(p.id, p));
+                normalized.forEach((p) => map.set(p.id, p));
+                return Array.from(map.values());
+              });
+            }
+            if (incomingBrand) setBrand({ ...defaultBrand, ...incomingBrand });
+            alert(`Nhập dữ liệu thành công: \${normalized.length} bài.`);
+          } catch (err) {
+            console.error(err);
+            alert("Không thể đọc file JSON. Vui lòng kiểm tra lại.");
+          } finally {
+            e.target.value = "";
+          }
+        };
+        reader.readAsText(file);
+      }
+
+      return (
+        <div className="min-h-screen bg-neutral-50 text-neutral-900">
+          <Navbar
+            brand={brand}
+            onHome={goHome}
+            onWrite={() => setRoute({ name: routes.WRITE })}
+            onExport={exportJSON}
+            onImport={handleImportClick}
+            onBrand={() => setBrandOpen(true)}
+          />
+          <input type="file" ref={fileRef} accept="application/json" onChange={handleImportFile} className="hidden" />
+
+          {route.name === routes.HOME && (
+            <Home
+              brand={brand}
+              posts={filteredPosts}
+              allTags={allTags}
+              query={query}
+              setQuery={setQuery}
+              activeTag={activeTag}
+              setActiveTag={setActiveTag}
+              onOpenPost={openPost}
+            />
+          )}
+          {route.name === routes.WRITE && (
+            <Write
+              onCancel={goHome}
+              onSave={(post) => {
+                setPosts((ps) => [{ ...post, id: uid() }, ...ps]);
+                goHome();
+              }}
+            />
+          )}
+          {route.name === routes.POST && (
+            <PostView
+              post={posts.find((p) => p.id === route.id)}
+              onBack={goHome}
+              onEdit={(id, updated) => {
+                setPosts((ps) => ps.map((p) => (p.id === id ? { ...p, ...updated } : p)));
+                setRoute({ name: routes.POST, id });
+              }}
+              onDelete={(id) => {
+                setPosts((ps) => ps.filter((p) => p.id !== id));
+                goHome();
+              }}
+            />
+          )}
+
+          <Footer brand={brand} />
+
+          <BrandSettings
+            open={brandOpen}
+            brand={brand}
+            onClose={() => setBrandOpen(false)}
+            onSave={(b) => {
+              setBrand(b);
+              setBrandOpen(false);
+            }}
+          />
+
+          <DevTests />
+        </div>
+      );
+    }
+
+    // Navbar & Footer
+    function Navbar({ brand, onHome, onWrite, onExport, onImport, onBrand }) {
+      return (
+        <div className="sticky top-0 z-50 backdrop-blur bg-white/75 border-b border-neutral-100">
+          <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
+            <button onClick={onHome} className="flex items-center gap-3 group">
+              {brand.logo ? (
+                <img src={brand.logo} alt={brand.name} className="h-9 w-9 rounded-xl object-contain bg-white"/>
+              ) : (
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-neutral-900 text-white">✈️</span>
+              )}
+              <span className="font-semibold text-lg group-hover:underline">{brand.name}</span>
+            </button>
+            <div className="ml-auto flex gap-2">
+              <Button onClick={onWrite}>✍️ Viết bài</Button>
+              <Button onClick={onImport}>⬆️ Nhập JSON</Button>
+              <Button onClick={onExport}>⬇️ Xuất JSON</Button>
+              <Button onClick={onBrand}>⚙️ Thương hiệu</Button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Footer({ brand }) {
+      return (
+        <div className="border-t border-neutral-100 mt-16">
+          <div className="max-w-6xl mx-auto px-4 py-10 text-sm text-neutral-500 flex flex-col md:flex-row gap-4 md:items-center justify-between">
+            <div>
+              © {new Date().getFullYear()} • {brand.name} — Nơi ghi lại hành trình & trải nghiệm
+            </div>
+            <div className="flex gap-4">
+              <a href="#" onClick={(e) => e.preventDefault()}>Điều khoản</a>
+              <a href="#" onClick={(e) => e.preventDefault()}>Chính sách riêng tư</a>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Home (Hero + Filters + List)
+    function Home({ brand, posts, allTags, query, setQuery, activeTag, setActiveTag, onOpenPost }) {
+      return (
+        <div>
+          <Hero brand={brand} />
+
+          <div className="max-w-6xl mx-auto px-4">
+            <Card className="p-5 md:p-6 -mt-16 relative z-10">
+              <div className="flex flex-col md:flex-row gap-3 md:items-center">
+                <div className="flex-1">
+                  <Input
+                    placeholder="Tìm kiếm địa điểm, tiêu đề, tag..."
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                </div>
+                <div className="flex-1 flex items-center gap-2">
+                  <span className="text-sm text-neutral-500">Lọc theo tag:</span>
+                  <div className="flex flex-wrap items-center">
+                    <Tag text={activeTag || "Tất cả"} onClick={() => setActiveTag("")} />
+                    {allTags.map((t) => (
+                      <Tag key={t} text={t} onClick={() => setActiveTag(t)} />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </Card>
+
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
+              {posts.map((p) => (
+                <PostCard key={p.id} post={p} onClick={() => onOpenPost(p)} />
+              ))}
+              {posts.length === 0 && (
+                <Card className="p-10 text-center">
+                  <div className="text-lg">Chưa có bài phù hợp với tìm kiếm.</div>
+                  <div className="text-neutral-500">Thử bỏ lọc Tag hoặc viết bài mới.</div>
+                </Card>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Hero({ brand }) {
+      return (
+        <div className="relative">
+          <div className="h-[320px] w-full bg-gradient-to-br from-sky-400/60 to-blue-600/60" />
+          <div className="absolute inset-0 flex items-center">
+            <div className="max-w-6xl mx-auto px-4">
+              <div className="bg-white/85 backdrop-blur rounded-3xl p-6 md:p-10 w-fit shadow">
+                <div className="flex items-center gap-4">
+                  {brand.logo && (
+                    <img src={brand.logo} alt={brand.name} className="h-14 w-14 rounded-2xl object-contain bg-white" />
+                  )}
+                  <div>
+                    <div className="text-2xl md:text-4xl font-bold">{brand.name}</div>
+                    <div className="mt-1 text-neutral-700 max-w-xl">{brand.tagline}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function PostCard({ post, onClick }) {
+      return (
+        <Card className="overflow-hidden hover:shadow-md transition">
+          <div
+            className="h-48 bg-cover bg-center"
+            style={{ backgroundImage: `url(${post.cover || fallback})` }}
+            role="img"
+            aria-label={post.title}
+          />
+          <div className="p-4">
+            <div className="text-xs text-neutral-500">{post.date} • {post.location}</div>
+            <div className="mt-1 font-semibold text-lg line-clamp-2">{post.title}</div>
+            <div className="mt-2 text-sm text-neutral-600 line-clamp-3">{post.content}</div>
+            <div className="mt-3 flex flex-wrap">
+              {post.tags?.slice(0, 4).map((t) => (
+                <span key={t} className="text-xs mr-2 mb-2 bg-neutral-100 px-2 py-1 rounded-full">#{t}</span>
+              ))}
+            </div>
+            <div className="mt-3">
+              <Button onClick={onClick}>Đọc bài</Button>
+            </div>
+          </div>
+        </Card>
+      );
+    }
+
+    const fallback =
+      "https://images.unsplash.com/photo-1502920514313-52581002a659?q=80&w=1600&auto=format&fit=crop";
+
+    // Write (Create new post)
+    function Write({ onCancel, onSave }) {
+      const [title, setTitle] = useState("");
+      const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+      const [location, setLocation] = useState("");
+      const [cover, setCover] = useState("");
+      const [photos, setPhotos] = useState("");
+      const [tags, setTags] = useState("");
+      const [activities, setActivities] = useState("");
+      const [content, setContent] = useState("");
+
+      function handleSave() {
+        const post = {
+          title: title || "Chuyến đi không tên",
+          date,
+          location,
+          cover: cover || fallback,
+          photos: splitPhotos(photos),
+          tags: splitTags(tags),
+          activities: splitActivities(activities),
+          content,
+        };
+        onSave(post);
+      }
+
+      return (
+        <div className="max-w-3xl mx-auto px-4">
+          <div className="mt-8 mb-4 text-2xl font-bold">✍️ Viết bài mới</div>
+          <Card className="p-5 md:p-6">
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm">Tiêu đề</label>
+                <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ví dụ: Một ngày ở Hội An" />
+              </div>
+              <div>
+                <label className="text-sm">Ngày</label>
+                <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-sm">Địa điểm</label>
+                <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Thành phố, quốc gia" />
+              </div>
+              <div>
+                <label className="text-sm">Ảnh bìa (URL)</label>
+                <Input value={cover} onChange={(e) => setCover(e.target.value)} placeholder="Dán link ảnh" />
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-sm">Bộ sưu tập ảnh (mỗi dòng một URL hoặc ngăn cách bằng dấu phẩy)</label>
+                <Textarea value={photos} onChange={(e) => setPhotos(e.target.value)} placeholder={"https://...\nhttps://..."} />
+              </div>
+              <div className="md:col-span-2 grid md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm">Tag (ngăn cách bằng dấu phẩy hoặc #)</label>
+                  <Input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="#VietNam, #Bien, #Nui" />
+                </div>
+                <div>
+                  <label className="text-sm">Hoạt động nổi bật (mỗi dòng một hoạt động)</label>
+                  <Textarea value={activities} onChange={(e) => setActivities(e.target.value)} placeholder={"Săn mây lúc 5:00\nĂn bánh mì\nĐi xe đạp quanh phố cổ"} />
+                </div>
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-sm">Nội dung / Gợi ý lịch trình, kinh nghiệm</label>
+                <Textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder="Chia sẻ hành trình của bạn..." />
+              </div>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <Button onClick={handleSave} className="bg-neutral-900 text-white hover:opacity-90 border-neutral-900">Lưu bài</Button>
+              <Button onClick={onCancel}>Hủy</Button>
+            </div>
+          </Card>
+        </div>
+      );
+    }
+
+    // Post View (Read + Edit + Delete)
+    function PostView({ post, onBack, onEdit, onDelete }) {
+      const [editing, setEditing] = useState(false);
+      const [draft, setDraft] = useState(post);
+
+      useEffect(() => setDraft(post), [post]);
+
+      if (!post) {
+        return (
+          <div className="max-w-3xl mx-auto px-4">
+            <Card className="p-8 mt-10 text-center">
+              <div>Bài viết không tồn tại.</div>
+              <div className="mt-4"><Button onClick={onBack}>Quay lại</Button></div>
+            </Card>
+          </div>
+        );
+      }
+
+      return (
+        <div className="max-w-3xl mx-auto px-4">
+          <div className="mt-6 flex items-center gap-2">
+            <Button onClick={onBack}>← Quay lại</Button>
+            {!editing && (
+              <>
+                <Button onClick={() => setEditing(true)}>Sửa</Button>
+                <Button onClick={() => onDelete(post.id)} className="border-red-300">Xóa</Button>
+              </>
+            )}
+          </div>
+
+          {!editing ? (
+            <article className="mt-6">
+              <img src={post.cover || fallback} alt={post.title} className="rounded-3xl w-full aspect-[16/9] object-cover" />
+              <h1 className="text-3xl font-bold mt-4">{post.title}</h1>
+              <div className="text-sm text-neutral-500 mt-1">{post.date} • {post.location}</div>
+              <div className="mt-3 flex flex-wrap">
+                {post.tags?.map((t) => (
+                  <span key={t} className="text-xs mr-2 mb-2 bg-neutral-100 px-2 py-1 rounded-full">#{t}</span>
+                ))}
+              </div>
+              {post.activities?.length > 0 && (
+                <Card className="p-4 mt-4">
+                  <div className="font-semibold mb-2">🎯 Hoạt động nổi bật</div>
+                  <ul className="list-disc pl-6 text-sm text-neutral-700 space-y-1">
+                    {post.activities.map((a, i) => (
+                      <li key={i}>{a}</li>
+                    ))}
+                  </ul>
+                </Card>
+              )}
+              <p className="mt-4 leading-7 whitespace-pre-wrap text-neutral-800">{post.content}</p>
+
+              {post.photos?.length > 0 && (
+                <div className="mt-6 grid sm:grid-cols-2 gap-3">
+                  {post.photos.map((src, i) => (
+                    <img key={i} src={src} alt={`photo-\${i}`} className="rounded-2xl w-full object-cover" />
+                  ))}
+                </div>
+              )}
+            </article>
+          ) : (
+            <EditForm
+              draft={draft}
+              setDraft={setDraft}
+              onCancel={() => setEditing(false)}
+              onSave={() => {
+                onEdit(post.id, draft);
+                setEditing(false);
+              }}
+            />
+          )}
+        </div>
+      );
+    }
+
+    function EditForm({ draft, setDraft, onCancel, onSave }) {
+      return (
+        <div className="mt-6">
+          <Card className="p-5 md:p-6">
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm">Tiêu đề</label>
+                <Input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-sm">Ngày</label>
+                <Input type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-sm">Địa điểm</label>
+                <Input value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-sm">Ảnh bìa (URL)</label>
+                <Input value={draft.cover} onChange={(e) => setDraft({ ...draft, cover: e.target.value })} />
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-sm">Bộ sưu tập ảnh (mỗi dòng một URL)</label>
+                <Textarea
+                  value={(draft.photos || []).join("\\n")}
+                  onChange={(e) => setDraft({ ...draft, photos: splitPhotos(e.target.value) })}
+                />
+              </div>
+              <div className="md:col-span-2 grid md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm">Tag</label>
+                  <Input
+                    value={(draft.tags || []).join(", ")}
+                    onChange={(e) => setDraft({ ...draft, tags: splitTags(e.target.value) })}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm">Hoạt động nổi bật</label>
+                  <Textarea
+                    value={(draft.activities || []).join("\\n")}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        activities: splitActivities(e.target.value),
+                      })
+                    }
+                  />
+                </div>
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-sm">Nội dung</label>
+                <Textarea value={draft.content} onChange={(e) => setDraft({ ...draft, content: e.target.value })} />
+              </div>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <Button onClick={onSave} className="bg-neutral-900 text-white hover:opacity-90 border-neutral-900">Lưu thay đổi</Button>
+              <Button onClick={onCancel}>Hủy</Button>
+            </div>
+          </Card>
+        </div>
+      );
+    }
+
+    // Brand Settings
+    function BrandSettings({ open, brand, onClose, onSave }) {
+      const [name, setName] = useState(brand.name);
+      const [tagline, setTagline] = useState(brand.tagline);
+      const [logo, setLogo] = useState(brand.logo);
+
+      useEffect(() => { setName(brand.name); setTagline(brand.tagline); setLogo(brand.logo); }, [brand]);
+
+      function handleFile(e) {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => setLogo(String(reader.result)); // base64 data URL
+        reader.readAsDataURL(file);
+      }
+
+      return (
+        <Modal open={open} onClose={onClose}>
+          <div className="text-xl font-semibold">⚙️ Cấu hình thương hiệu</div>
+          <div className="text-sm text-neutral-500">Tùy chỉnh tên, tagline và logo của {brand.name}.</div>
+          <div className="grid md:grid-cols-2 gap-4 mt-4">
+            <div>
+              <label className="text-sm">Tên thương hiệu</label>
+              <Input value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+            <div>
+              <label className="text-sm">Tagline</label>
+              <Input value={tagline} onChange={(e) => setTagline(e.target.value)} />
+            </div>
+            <div className="md:col-span-2">
+              <label className="text-sm">Logo (tải file PNG/JPG)</label>
+              <div className="flex items-center gap-3 mt-1">
+                <input type="file" accept="image/*" onChange={handleFile} />
+                <Button onClick={() => setLogo("")}>Bỏ logo (chỉ dùng chữ)</Button>
+              </div>
+              {logo && (
+                <div className="mt-3">
+                  <img src={logo} alt="preview" className="h-16 rounded-xl bg-white object-contain" />
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="mt-6 flex gap-3 justify-end">
+            <Button onClick={onClose}>Đóng</Button>
+            <Button onClick={() => onSave({ name, tagline, logo })} className="bg-neutral-900 text-white border-neutral-900">Lưu thương hiệu</Button>
+          </div>
+        </Modal>
+      );
+    }
+
+    // Dev Tests (console + UI nhẹ)
+    function DevTests() {
+      const [result, setResult] = useState(null);
+      useEffect(() => {
+        const tests = [
+          { name: 'splitPhotos newline', run: () => JSON.stringify(splitPhotos('a\\nb')) === JSON.stringify(['a','b']) },
+          { name: 'splitPhotos comma+space', run: () => JSON.stringify(splitPhotos('a, b , c')) === JSON.stringify(['a','b','c']) },
+          { name: 'splitTags comma-#-newline', run: () => JSON.stringify(splitTags('#x, y\\n z')) === JSON.stringify(['x','y','z']) },
+          { name: 'splitActivities hyphen/semicolon/newline', run: () => JSON.stringify(splitActivities('one-two;three\\nfour')) === JSON.stringify(['one','two','three','four']) },
+          { name: 'empty trimmed', run: () => JSON.stringify(splitPhotos('a\\n \\n , ,b')) === JSON.stringify(['a','b']) },
+        ];
+        const failures = tests.filter(t => !t.run());
+        if (failures.length === 0) {
+          console.log('%c[TripVista Tests] All tests passed', 'color: green');
+          setResult('ok');
+        } else {
+          console.error('[TripVista Tests] Failed:', failures.map(f => f.name));
+          setResult('fail');
+        }
+      }, []);
+      if (result !== 'fail') return null;
+      return (
+        <div className="fixed bottom-3 right-3 bg-red-600 text-white text-sm px-3 py-2 rounded-xl shadow">
+          Một số kiểm thử nội bộ thất bại — mở console để xem chi tiết.
+        </div>
+      );
+    }
+
+    // Mount app
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<TripVistaApp />);
+  </script>
+</body>
+</html>
